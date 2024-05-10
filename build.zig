@@ -18,11 +18,6 @@ pub fn build(b: *std.Build) void {
 
     exe.root_module.addImport("av", ffmpeg_dep.module("av"));
 
-    if (target.query.isNative() and target.result.os.tag == .linux) {
-        exe.linkSystemLibrary("sdl2");
-        exe.linkLibC();
-    }
-
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);

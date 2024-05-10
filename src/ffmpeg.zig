@@ -1,5 +1,6 @@
 const std = @import("std");
 const av = @import("av");
+const videoFile = "video.h264";
 pub const Frame = av.Frame;
 fn wrapAV(averror: c_int) !void {
     return switch (averror) {
@@ -33,7 +34,9 @@ fn wrapAV(averror: c_int) !void {
         else => return,
     };
 }
-
+fn println(comptime fmt: []const u8, args: anytype) void {
+    std.debug.print(fmt ++ "\n", args);
+}
 const EncoderInitError = error{
     AllocBufferFailed,
     AllocFrameFailed,
@@ -71,8 +74,11 @@ pub const Encoder = struct {
     }
 };
 
-pub fn newEncoder(input: *std.fs.File) !Encoder {
-    const bufferSize = 1024 * 1024;
+pub fn newEncoder() !Encoder {
+    var input = try std.fs.cwd().openFile(videoFile, .{});
+    defer input.close();
+
+    const bufferSize = 128;
 
     var formatCtx = av.avformat_alloc_context() orelse {
         return EncoderInitError.AllocFormatContextFailed;
@@ -81,7 +87,7 @@ pub fn newEncoder(input: *std.fs.File) !Encoder {
     const buffer = av.av_malloc(bufferSize) orelse {
         return EncoderInitError.AllocBufferFailed;
     };
-    const avioCtx = av.avio_alloc_context(buffer, bufferSize, av.IOContext.WriteFlag.read_only, input, @ptrCast(&readPacket), null, null);
+    const avioCtx = av.avio_alloc_context(buffer, bufferSize, av.IOContext.WriteFlag.read_only, &input, @ptrCast(&readPacket), null, null);
     formatCtx.pb = avioCtx;
     try wrapAV(av.avformat_open_input(@as(*?*av.FormatContext, @ptrCast(&formatCtx)), "", null, null));
     const bestStream = try formatCtx.find_best_stream(av.MediaType.VIDEO, -1, -1);
@@ -109,14 +115,16 @@ pub fn newEncoder(input: *std.fs.File) !Encoder {
 }
 
 fn readPacket(file: *std.fs.File, buffer: [*:0]u8, bufferSize: c_int) callconv(.C) c_int {
-    _ = file.getPos() catch {
-        return @as(c_int, @intFromEnum(av.ERROR.EXIT));
-    };
+    // _ = file.getPos() catch {
+    //     return @as(c_int, @intFromEnum(av.ERROR.EXIT));
+    // };
+    println("Read", .{});
     const n = file.read(buffer[0..@as(usize, @intCast(bufferSize))]) catch {
         return @as(c_int, @intFromEnum(av.ERROR.UNKNOWN));
     };
     if (n == 0) {
         return @as(c_int, @intFromEnum(av.ERROR.EOF));
     }
+    println("Read: {}", .{n});
     return @as(c_int, @intCast(n));
 }

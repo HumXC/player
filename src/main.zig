@@ -82,16 +82,19 @@ pub fn main() !void {
         try window.drawFrame(frame);
         try window.showFrame();
         var event: sdl.SDL_Event = undefined;
-        const result = sdl.SDL_PollEvent(&event);
-        if (result != 0) {
-            continue;
-        }
-        switch (event.type) {
-            sdl.SDL_QUIT => break,
-            sdl.SDL_WINDOWEVENT_RESIZED => {
-                try window.showFrame();
-            },
-            else => {},
+        while (sdl.SDL_PollEvent(&event) != 0) {
+            switch (event.type) {
+                sdl.SDL_QUIT => {
+                    println("QUIr", .{});
+                    break;
+                },
+                sdl.SDL_WINDOWEVENT_RESIZED => {
+                    println("resize", .{});
+                    try window.setLogicalSize(event.window.data1, event.window.data2);
+                    try window.showFrame();
+                },
+                else => {},
+            }
         }
     }
 }
@@ -101,6 +104,9 @@ const Window = struct {
     var texture: ?*sdl.SDL_Texture = null;
     var width: i32 = 0;
     var height: i32 = 0;
+    fn setLogicalSize(self: Window, w: i32, h: i32) !void {
+        try wrapSDL(sdl.SDL_RenderSetLogicalSize(self.renderer, w, h));
+    }
     fn showFrame(self: Window) !void {
         var winWidth: c_int = 0;
         var winHeight: c_int = 0;
@@ -174,14 +180,14 @@ const Window = struct {
     }
 };
 fn newWindow(title: [*c]const u8, width: i32, height: i32) !Window {
-    try wrapSDL(sdl.SDL_Init(sdl.SDL_INIT_VIDEO | sdl.SDL_INIT_EVENTS));
+    try wrapSDL(sdl.SDL_Init(sdl.SDL_INIT_EVENTS));
     const window = sdl.SDL_CreateWindow(
         title,
         sdl.SDL_WINDOWPOS_UNDEFINED,
         sdl.SDL_WINDOWPOS_UNDEFINED,
         width,
         height,
-        sdl.SDL_WINDOW_RESIZABLE,
+        sdl.SDL_WINDOW_BORDERLESS | sdl.SDL_WINDOW_RESIZABLE | sdl.SDL_WINDOW_ALLOW_HIGHDPI,
     ) orelse {
         return throwSDL();
     };
@@ -262,13 +268,11 @@ fn readPacket(file: *std.fs.File, buffer: [*:0]u8, bufferSize: c_int) callconv(.
     _ = file.getPos() catch {
         return @as(c_int, @intFromEnum(av.ERROR.EXIT));
     };
-    const n = file.read(buffer[0..@as(usize, @intCast(bufferSize))]) catch |e| {
-        if (e == error.EndOfFile) {
-            println("EOF", .{});
-            return @as(c_int, @intFromEnum(av.ERROR.EOF));
-        }
-        println("ERR", .{});
+    const n = file.read(buffer[0..@as(usize, @intCast(bufferSize))]) catch {
         return @as(c_int, @intFromEnum(av.ERROR.UNKNOWN));
     };
+    if (n == 0) {
+        return @as(c_int, @intFromEnum(av.ERROR.EOF));
+    }
     return @as(c_int, @intCast(n));
 }

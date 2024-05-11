@@ -21,6 +21,7 @@ pub fn main() !void {
     defer decoder.close();
     var isEOF = false;
     mainLoop: while (true) {
+        const tt = std.time.milliTimestamp();
         if (!isEOF) {
             decoder.sendPacket() catch |e| {
                 if (e == ffmpeg.Error.EndOfFile) {
@@ -32,6 +33,7 @@ pub fn main() !void {
                 }
             };
         }
+        println("Send: {}", .{std.time.milliTimestamp() - tt});
 
         const frame = try decoder.reciveFrame() orelse {
             if (isEOF) {

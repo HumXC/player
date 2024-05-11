@@ -50,7 +50,7 @@ fn constPtrCast(comptime T: type, ptr: anytype) T {
 fn println(comptime fmt: []const u8, args: anytype) void {
     std.debug.print(fmt ++ "\n", args);
 }
-
+const EAGAIN: c_int = -11;
 pub const Decoder = struct {
     packet: *av.Packet,
     frame: *av.Frame,
@@ -61,8 +61,13 @@ pub const Decoder = struct {
     buffer: [*]u8,
     var hasFrame: bool = false;
     pub fn sendPacket(self: Decoder) !void {
+        var ret: c_int = 0;
         try wrapAV(av.av_read_frame(self.formatCtx, self.packet));
-        try wrapAV(av.avcodec_send_packet(self.codecCtx, self.packet));
+        ret = av.avcodec_send_packet(self.codecCtx, self.packet);
+        try wrapAV(ret);
+        if (ret == EAGAIN) {
+            return error.EAGAIN;
+        }
     }
     pub fn reciveFrame(self: Decoder) !?*av.Frame {
         const ret = av.avcodec_receive_frame(self.codecCtx, self.frame);

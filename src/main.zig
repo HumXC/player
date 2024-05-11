@@ -15,13 +15,14 @@ pub fn main() !void {
     var video = std.io.getStdIn();
     const window = try sdl.newWindow("video player", 100, 100);
     defer window.close();
-    var t = std.time.milliTimestamp();
+    var fpsTime = std.time.milliTimestamp();
     var count: usize = 0;
     var decoder = try ffmpeg.newDecoder(&video);
     defer decoder.close();
     var isEOF = false;
+    var t = std.time.milliTimestamp();
+    t = 0;
     mainLoop: while (true) {
-        const tt = std.time.milliTimestamp();
         if (!isEOF) {
             decoder.sendPacket() catch |e| {
                 if (e == ffmpeg.Error.EndOfFile) {
@@ -33,15 +34,12 @@ pub fn main() !void {
                 }
             };
         }
-        println("Send: {}", .{std.time.milliTimestamp() - tt});
-
         const frame = try decoder.reciveFrame() orelse {
             if (isEOF) {
                 break :mainLoop;
             }
             continue;
         };
-
         count += 1;
         try window.drawFrame(frame);
         try window.showFrame();
@@ -50,21 +48,18 @@ pub fn main() !void {
         while (c.SDL_PollEvent(&event) != 0) {
             switch (event.type) {
                 c.SDL_QUIT => {
-                    println("Exit", .{});
                     break :mainLoop;
                 },
                 c.SDL_WINDOWEVENT_RESIZED => {
-                    println("resize", .{});
                     try window.setLogicalSize(event.window.data1, event.window.data2);
                     try window.showFrame();
                 },
                 else => {},
             }
         }
-        if (std.time.milliTimestamp() - t > 1000) {
-            println("FPS: {}", .{count});
+        if (std.time.milliTimestamp() - fpsTime > 1000) {
             count = 0;
-            t = std.time.milliTimestamp();
+            fpsTime = std.time.milliTimestamp();
         }
     }
     println("Exit", .{});

@@ -33,7 +33,7 @@ fn wrapAV(averror: c_int) !void {
         else => return,
     };
 }
-
+pub const Error = av.Error;
 const EncoderInitError = error{
     AllocBufferFailed,
     AllocFrameFailed,
@@ -47,23 +47,43 @@ fn ptrCast(comptime T: type, ptr: anytype) T {
 fn constPtrCast(comptime T: type, ptr: anytype) T {
     return ptrCast(T, @constCast(ptr));
 }
-pub const Encoder = struct {
+fn println(comptime fmt: []const u8, args: anytype) void {
+    std.debug.print(fmt ++ "\n", args);
+}
+
+pub const Decoder = struct {
     packet: *av.Packet,
     frame: *av.Frame,
-
     formatCtx: *av.FormatContext,
     avioCtx: *av.IOContext,
     codecCtx: *av.CodecContext,
+    codec: *const av.Codec,
     buffer: [*]u8,
-    pub fn reciveFrame(self: Encoder) !*av.Frame {
-        av.av_packet_unref(self.packet);
-        av.av_frame_unref(self.frame);
+    var hasFrame: bool = false;
+    pub fn sendPacket(self: Decoder) !void {
         try wrapAV(av.av_read_frame(self.formatCtx, self.packet));
         try wrapAV(av.avcodec_send_packet(self.codecCtx, self.packet));
-        try wrapAV(av.avcodec_receive_frame(self.codecCtx, self.frame));
+    }
+    pub fn reciveFrame(self: Decoder) !?*av.Frame {
+        const ret = av.avcodec_receive_frame(self.codecCtx, self.frame);
+        try wrapAV(ret);
+        if (ret < 0) {
+            return null;
+        }
         return self.frame;
     }
-    pub fn close(self: Encoder) void {
+
+    pub fn getFrame(self: Decoder) ?*av.Frame {
+        if (hasFrame) {
+            hasFrame = false;
+            return self.frame;
+        }
+        return null;
+    }
+
+    pub fn close(self: Decoder) void {
+        av.av_packet_unref(self.packet);
+        av.av_frame_unref(self.frame);
         av.av_packet_free(constPtrCast(*?*av.Packet, &self.packet));
         av.av_frame_free(constPtrCast(*?*av.Frame, &self.frame));
         av.avcodec_free_context(constPtrCast(*?*av.CodecContext, &self.codecCtx));
@@ -71,8 +91,8 @@ pub const Encoder = struct {
     }
 };
 
-pub fn newEncoder(input: *std.fs.File) !Encoder {
-    const bufferSize = 1024 * 1024;
+pub fn newDecoder(input: *std.fs.File) !Decoder {
+    const bufferSize = 1024 * 1024 * 4;
 
     var formatCtx = av.avformat_alloc_context() orelse {
         return EncoderInitError.AllocFormatContextFailed;
@@ -84,21 +104,22 @@ pub fn newEncoder(input: *std.fs.File) !Encoder {
     const avioCtx = av.avio_alloc_context(buffer, bufferSize, av.IOContext.WriteFlag.read_only, input, @ptrCast(&readPacket), null, null);
     formatCtx.pb = avioCtx;
     try wrapAV(av.avformat_open_input(@as(*?*av.FormatContext, @ptrCast(&formatCtx)), "", null, null));
+    // try wrapAV(av.avformat_find_stream_info(formatCtx, null));
     const bestStream = try formatCtx.find_best_stream(av.MediaType.VIDEO, -1, -1);
     const params = formatCtx.streams[bestStream[0]].*.codecpar;
-    const codec = bestStream[1];
+    const codec: *const av.Codec = bestStream[1];
     const codecCtx = av.avcodec_alloc_context3(codec) orelse {
         return EncoderInitError.AllocCodecContextFailed;
     };
-
+    codecCtx.thread_count = 0;
     try wrapAV(av.avcodec_parameters_to_context(codecCtx, params));
     try wrapAV(av.avcodec_open2(codecCtx, codec, null));
-
-    return Encoder{
+    const decoder = Decoder{
         .avioCtx = avioCtx,
         .formatCtx = formatCtx,
         .codecCtx = codecCtx,
         .buffer = buffer,
+        .codec = codec,
         .frame = av.av_frame_alloc() orelse {
             return EncoderInitError.AllocFrameFailed;
         },
@@ -106,12 +127,10 @@ pub fn newEncoder(input: *std.fs.File) !Encoder {
             return EncoderInitError.AllocPacketFailed;
         },
     };
+    return decoder;
 }
 
 fn readPacket(file: *std.fs.File, buffer: [*:0]u8, bufferSize: c_int) callconv(.C) c_int {
-    _ = file.getPos() catch {
-        return @as(c_int, @intFromEnum(av.ERROR.EXIT));
-    };
     const n = file.read(buffer[0..@as(usize, @intCast(bufferSize))]) catch {
         return @as(c_int, @intFromEnum(av.ERROR.UNKNOWN));
     };

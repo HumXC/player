@@ -15,35 +15,48 @@ pub fn main() !void {
     var video = std.io.getStdIn();
     const window = try sdl.newWindow("video player", 100, 100);
     defer window.close();
-    var fpsTime = std.time.milliTimestamp();
-    var count: usize = 0;
-    var decoder = try ffmpeg.newDecoder(&video);
+    const decoder = try ffmpeg.newDecoder(&video);
     defer decoder.close();
-    var isEOF = false;
+    var fpsTime = std.time.milliTimestamp();
+    var fpsCount: usize = 0;
     var t = std.time.milliTimestamp();
     t = 0;
+    var isEOF = false;
     mainLoop: while (true) {
-        if (!isEOF) {
-            decoder.sendPacket() catch |e| {
-                if (e == ffmpeg.Error.EndOfFile) {
+        decoder.sendPacket() catch |e| {
+            switch (e) {
+                error.EndOfFile => {
                     println("EOF", .{});
                     isEOF = true;
-                } else {
+                },
+                error.WouldBlock => {
+                    continue;
+                },
+                else => {
                     println("Error: {}", .{e});
-                    break;
-                }
-            };
-        }
-        const frame = try decoder.reciveFrame() orelse {
+                    isEOF = true;
+                },
+            }
+        };
+        const frame = decoder.reciveFrame() catch |e| {
+            switch (e) {
+                error.EndOfFile => {
+                    break :mainLoop;
+                },
+                else => {
+                    println("Error: {}", .{e});
+                    break :mainLoop;
+                },
+            }
+        } orelse {
             if (isEOF) {
                 break :mainLoop;
             }
             continue;
         };
-        count += 1;
         try window.drawFrame(frame);
         try window.showFrame();
-
+        fpsCount += 1;
         var event: c.SDL_Event = undefined;
         while (c.SDL_PollEvent(&event) != 0) {
             switch (event.type) {
@@ -58,7 +71,7 @@ pub fn main() !void {
             }
         }
         if (std.time.milliTimestamp() - fpsTime > 1000) {
-            count = 0;
+            fpsCount = 0;
             fpsTime = std.time.milliTimestamp();
         }
     }
